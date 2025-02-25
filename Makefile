@@ -25,6 +25,9 @@ PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
 
 DOCKER_IMAGE_NAME       ?= node-exporter
 MACH                    ?= $(shell uname -m)
+OS_PKG_NAME             ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
+MACH_PKG_NAME           ?= $(shell uname -m | tr '[:upper:]' '[:lower:]')
+PACKAGE_NAME            ?= node_exporter-stable-$(OS_PKG_NAME)-$(MACH_PKG_NAME).tar.gz
 
 STATICCHECK_IGNORE =
 
@@ -86,6 +89,11 @@ $(eval $(call goarch_pair,mips64,mips))
 $(eval $(call goarch_pair,mips64el,mipsel))
 
 all:: vet checkmetrics checkrules common-all $(cross-test) $(test-e2e)
+
+.PHONY: package
+package: build
+	@echo ">> Packaging binaries"
+	@tar -czvf $(PACKAGE_NAME) ./node_exporter
 
 .PHONY: test
 test: collector/fixtures/sys/.unpacked collector/fixtures/udev/.unpacked
