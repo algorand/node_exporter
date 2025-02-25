@@ -6,6 +6,7 @@ package collector
 import (
 	"fmt"
 	"io/ioutil"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/common/log"
 )
 
 type expiringMetricValue struct {
@@ -33,13 +33,17 @@ type GatewayCollector struct {
 	sampleInterval   float64
 	nextHandler      http.HandlerFunc
 	metricsMu        sync.Mutex
+	logger           *slog.Logger
 }
 
 // DefaultGatewayCollector is the singleton gateway collector
 var DefaultGatewayCollector = newGatewayCollector()
 
 func init() {
-	registerCollector("gateway", defaultEnabled, func() (Collector, error) { return DefaultGatewayCollector, nil })
+	registerCollector("gateway", defaultEnabled, func(logger *slog.Logger) (Collector, error) {
+		DefaultGatewayCollector.logger = logger
+		return DefaultGatewayCollector, nil
+	})
 }
 
 // NewGatewayCollector returns a new Collector exposing gateway stats.
@@ -130,7 +134,7 @@ func (c *GatewayCollector) Collect(ch chan<- prometheus.Metric) {
 func (c *GatewayCollector) postHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		log.Errorln("Error reading body: ", err)
+		c.logger.Error("Error reading body", "err", err)
 		http.Error(w, "can't read body", http.StatusBadRequest)
 		return
 	}
@@ -139,8 +143,6 @@ func (c *GatewayCollector) postHandler(w http.ResponseWriter, r *http.Request) {
 		w.Header()["SampleRate"] = []string{fmt.Sprintf("%3.2f", c.sampleInterval)}
 		go c.parsePostMetrics(string(body))
 	}
-
-	return
 }
 
 type labelPair struct {
