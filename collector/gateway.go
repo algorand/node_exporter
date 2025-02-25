@@ -5,7 +5,7 @@ package collector
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -132,7 +132,7 @@ func (c *GatewayCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (c *GatewayCollector) postHandler(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		c.logger.Error("Error reading body", "err", err)
 		http.Error(w, "can't read body", http.StatusBadRequest)
@@ -286,7 +286,6 @@ func (c *GatewayCollector) parsePostMetrics(metrics string) {
 			continue
 		}
 	}
-	return
 }
 
 func (c *GatewayCollector) addExpiringMetric(metricName string, labelValues []string) {
@@ -313,7 +312,6 @@ func (c *GatewayCollector) addExpiringMetric(metricName string, labelValues []st
 	// can't find it in the list. add to the list.
 	c.expiringMetrics[metricName] = append(c.expiringMetrics[metricName], &expiringMetricValue{values: labelValues, expiryDeadline: deadLine})
 	//fmt.Printf("appending metric for '%s' with exp=%v now=%v\n", metricName, deadLine, now)
-	return
 }
 
 func (c *GatewayCollector) compareLabelValues(labelValues1 []string, labelValues2 []string) bool {
