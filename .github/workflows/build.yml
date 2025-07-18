@@ -120,6 +120,8 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
       - name: Comment PR with checksums
         uses: actions/github-script@v7
+        env:
+          CHECKSUMS_CONTENT: ${{ steps.collect_checksums.outputs.checksums }}
         with:
           script: |
             const { data: comments } = await github.rest.issues.listComments({
@@ -133,7 +135,7 @@ jobs:
               comment.body.includes('Build Checksums')
             );
             
-            const body = `${{ steps.collect_checksums.outputs.checksums }}`;
+            const body = process.env.CHECKSUMS_CONTENT;
             
             if (botComment) {
               await github.rest.issues.updateComment({
