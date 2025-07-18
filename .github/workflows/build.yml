@@ -3,6 +3,11 @@ on:
   push:
     branches: [ master ]
   pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -16,11 +21,15 @@ jobs:
           go-version: '1.23.11'
       - run: make test
       - run: make package
-      - run: shasum -a 256 node_exporter node_exporter*.tar.gz
+      - run: shasum -a 256 node_exporter node_exporter*.tar.gz | tee checksums-${{ matrix.os }}.txt
       - uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.os }}
           path: "*.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.os }}
+          path: "checksums-${{ matrix.os }}.txt"
 
   create-universal-binary:
     runs-on: macos-latest
@@ -56,8 +65,88 @@ jobs:
           PACKAGE_NAME=node_exporter-stable-darwin-universal.tar.gz
           tar -czvf ${PACKAGE_NAME} node_exporter
       - name: Generate checksum
-        run: shasum -a 256 node_exporter node_exporter*.tar.gz
+        run: shasum -a 256 node_exporter node_exporter*.tar.gz | tee checksums-darwin-universal.txt
       - uses: actions/upload-artifact@v4
         with:
           name: package-darwin-universal
           path: "*.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-darwin-universal
+          path: "checksums-darwin-universal.txt"
+
+  post-checksums:
+    runs-on: ubuntu-latest
+    needs: [build, create-universal-binary]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Download all checksum artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: checksums-*
+          merge-multiple: true
+      - name: Collect all checksums
+        id: collect_checksums
+        run: |
+          echo "## Build Checksums (SHA256)" > checksums.md
+          echo "" >> checksums.md
+          echo "| Platform | Binary | Package |" >> checksums.md
+          echo "|----------|--------|---------|" >> checksums.md
+          
+          for file in checksums-*.txt; do
+            platform=$(echo "$file" | sed 's/checksums-\(.*\)\.txt/\1/')
+            case $platform in
+              "ubuntu-24.04") platform_name="Linux x86_64" ;;
+              "ubuntu-24.04-arm") platform_name="Linux ARM64" ;;
+              "macos-13") platform_name="macOS x86_64" ;;
+              "macos-14") platform_name="macOS ARM64" ;;
+              "darwin-universal") platform_name="macOS Universal" ;;
+              *) platform_name="$platform" ;;
+            esac
+            
+            # Read the checksums file and parse binary and package checksums
+            binary_sum=$(grep "node_exporter$" "$file" | cut -d' ' -f1 | head -1)
+            package_sum=$(grep "\.tar\.gz$" "$file" | cut -d' ' -f1 | head -1)
+            
+            echo "| $platform_name | \`$binary_sum\` | \`$package_sum\` |" >> checksums.md
+          done
+          
+          echo "" >> checksums.md
+          echo "_Generated on $(date -u '+%Y-%m-%d %H:%M:%S UTC') by GitHub Actions_" >> checksums.md
+          
+          # Set the content as output for the PR comment
+          echo "checksums<<EOF" >> $GITHUB_OUTPUT
+          cat checksums.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: Comment PR with checksums
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.login === 'github-actions[bot]' && 
+              comment.body.includes('Build Checksums')
+            );
+            
+            const body = `${{ steps.collect_checksums.outputs.checksums }}`;
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
