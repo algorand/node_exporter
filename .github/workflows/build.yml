@@ -28,7 +28,7 @@ jobs:
           path: "checksums-${{ matrix.os }}.txt"
 
   create-universal-binary:
-    runs-on: macos-latest
+    runs-on: macos-14
     needs: build
     steps:
       - uses: actions/checkout@v4
