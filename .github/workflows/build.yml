@@ -3,21 +3,70 @@ on:
   push:
     branches: [ master ]
   pull_request:
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-13, macos-14] # linux-x86_64, darwin-x86_64, darwin-arm64
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-13, macos-14] # linux-x86_64, linux-arm64, darwin-x86_64, darwin-arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.23.6'
+          go-version: '1.23.11'
       - run: make test
       - run: make package
-      - run: shasum -a 256 node_exporter node_exporter*.tar.gz
+      - run: shasum -a 256 node_exporter node_exporter*.tar.gz | tee checksums-${{ matrix.os }}.txt
       - uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.os }}
           path: "*.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-${{ matrix.os }}
+          path: "checksums-${{ matrix.os }}.txt"
+
+  create-universal-binary:
+    runs-on: macos-14
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download macOS x86_64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: package-macos-13
+          path: ./macos-x86_64
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: package-macos-14
+          path: ./macos-arm64
+      - name: Extract binaries
+        run: |
+          cd macos-x86_64 && tar -xzf *.tar.gz
+          cd ../macos-arm64 && tar -xzf *.tar.gz
+      - name: Create universal binary
+        run: |
+          lipo -create -output node_exporter_universal \
+            macos-x86_64/node_exporter \
+            macos-arm64/node_exporter
+      - name: Verify universal binary
+        run: |
+          file node_exporter_universal
+          lipo -info node_exporter_universal
+      - name: Package universal binary
+        run: |
+          mv node_exporter_universal node_exporter
+          PACKAGE_NAME=node_exporter-stable-darwin-universal.tar.gz
+          tar -czvf ${PACKAGE_NAME} node_exporter
+      - name: Generate checksum
+        run: shasum -a 256 node_exporter node_exporter*.tar.gz | tee checksums-darwin-universal.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-darwin-universal
+          path: "*.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums-darwin-universal
+          path: "checksums-darwin-universal.txt"
